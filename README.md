@@ -12,9 +12,9 @@ VC Smart Slate app on an iPhone or iPad records each clap from the sticks,
 frame-accurately, exactly once, and shows the hardware's state.
 
 **Status.** Draft for the hardware developer to work against and correct.
-The app already records hardware claps and drops retransmissions (below,
-"What the app already does"). The Bluetooth link to the board is **not built
-yet**: it will be written to this document, so changes to it should be
+The app's side is built to this draft: the packets, the clock matching, the
+Bluetooth connection, a simulated board, and a test screen in the app
+(Settings › Hardware slate, section 12). Changes to the protocol should be
 agreed before either side builds against them. Open questions are at the
 end; answers there change the draft.
 
@@ -318,14 +318,39 @@ latencies) and a reference.
 Answers go back into this document; the app's side is then built to it,
 starting with the test screen.
 
-## 12. Where the app's side will live
+## 12. The app's side, and the test screen
 
-- `SlateCore/Sources/SlateCore/Hardware/` — packet encoding and decoding,
-  the time-sync filter and the event queue rules, as pure Swift with tests
-  that run on macOS and Linux, from byte fixtures in this document.
-- `SlateCore/Sources/SlateKit/` — the CoreBluetooth link, feeding claps
-  into the session the way the touch sticks do.
-- `App/Sources/` — pairing in Settings; the hardware test screen.
+Built to this draft (31 October 2026):
 
-A board simulator (the same packets from a Mac or a second phone) will be
-built alongside, so both sides can test before the other is ready.
+- `SlateCore/Sources/SlateCore/Hardware/` — the packets
+  (`HardwareProtocol.swift`), the clock matching (`BoardClock.swift`: the
+  quicker half of the exchanges, a line through them for drift), and a
+  board in software (`BoardSimulator.swift`). Pure Swift, tested on macOS
+  and Linux.
+- `SlateCore/Sources/SlateKit/HardwareMonitor.swift` — turns events into
+  claps on this device's clock at the instant the sticks met, answers each
+  with an ack, refuses a clap before the first time sync rather than
+  misplace it, and keeps the log the test screen shows.
+- `App/Sources/HardwareLink.swift` — Core Bluetooth: scans for the VC Slate
+  service, connects, subscribes to Event, Time Sync and Status, reads the
+  serial number (the device ID claps carry), writes Event Ack and pings
+  every 5 s. The simulated board, with a radio of 10 to 60 ms each way.
+- **The test screen**, Settings › Hardware slate: find and connect a board,
+  or use the simulated one; its status; the clock (offset, round trip last
+  and best, drift in ppm); the radio delay over the last 50 events; and
+  every event, newest first, with how late it arrived and what the slate
+  did. *Clap the slate from the board* off is a bench test: logged and
+  answered, nothing written. On, the board's claps go on the day.
+
+**Byte fixtures** for the firmware, from `SlateCore/Tests/SlateKitTests/HardwareTests.swift`
+(the app's own tests check these exact bytes):
+
+| Packet | Values | Bytes (hex) |
+|---|---|---|
+| Event | sticks closed, boot `0x11223344`, sequence 7, tick `0x0102030405060708`, resend | `01 01 44 33 22 11 07 00 00 00 08 07 06 05 04 03 02 01 01 00` |
+| Event Ack | same event, duplicate, take 3, frames 1 234 567 | `01 44 33 22 11 07 00 00 00 02 03 00 87 d6 12 00` |
+| Ping | nonce 9, t1 1 000 000 µs | `01 01 09 00 00 00 40 42 0f 00 00 00 00 00` |
+| Status | closed, 87 %, charging, 2 queued, boot `0x11223344`, −5 °C | `01 01 57 01 02 00 00 00 44 33 22 11 00 00 fb 00` |
+
+Not built yet: the Card and Timecode packets (section 8), which wait on
+open question 1.
