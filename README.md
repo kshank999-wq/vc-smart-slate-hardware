@@ -335,12 +335,36 @@ Built to this draft (31 October 2026):
   service, connects, subscribes to Event, Time Sync and Status, reads the
   serial number (the device ID claps carry), writes Event Ack and pings
   every 5 s. The simulated board, with a radio of 10 to 60 ms each way.
-- **The test screen**, Settings › Hardware slate: find and connect a board,
-  or use the simulated one; its status; the clock (offset, round trip last
-  and best, drift in ppm); the radio delay over the last 50 events; and
-  every event, newest first, with how late it arrived and what the slate
-  did. *Clap the slate from the board* off is a bench test: logged and
-  answered, nothing written. On, the board's claps go on the day.
+- **The test screen**, Settings › Hardware slate, in this order:
+  - **Board**: find boards advertising the VC Slate service (name and
+    signal strength), connect, disconnect; or *Use the simulated board*.
+    Once connected: the board's name and serial number.
+  - **Simulated board** (when it is the one connected): the last event at
+    the top — what was pressed, how late the radio delivered it, and what
+    the slate did with it — then buttons for every event kind (sticks
+    closed and opened, tail slate, ROLL, CUT, next take) and *Out of range*,
+    which holds every press on the board until it is switched off, when the
+    board resends its queue and each press is still one event.
+  - **Status**: sticks, battery and charging, events waiting on the board,
+    events dropped since boot, boot ID, last error, temperature.
+  - **Clock**: how far the board's clock is ahead of the device's, round
+    trip last and best, drift in ppm, exchanges answered, the radio delay
+    over the last 50 events (average and worst), and *Sync now*. Until the
+    first exchange the screen says the board is not synced, and a clap is
+    refused rather than placed by arrival time.
+  - ***Clap the slate from the board***: off (the default) is a bench
+    test — every event logged and acknowledged, so the board stops
+    resending, and nothing written to the day. On, the board's sticks clap
+    the slate on the instant they met, and ROLL, CUT, tail slate and next
+    take act, each once however often it is resent.
+  - **Events**: every event, newest first: kind, RESENT if flagged, radio
+    delay, what the slate did (in red if refused), and the event ID and
+    board tick.
+- **Which builds have it.** Development and TestFlight builds, for the
+  team and the board's developer. The App Store version is built with the
+  screen off (the `HARDWARE_TESTING` build setting): *Hardware slate* shows
+  greyed out, "coming soon", and Bluetooth never starts, until the
+  hardware ships.
 
 **Byte fixtures** for the firmware, from `SlateCore/Tests/SlateKitTests/HardwareTests.swift`
 (the app's own tests check these exact bytes):
