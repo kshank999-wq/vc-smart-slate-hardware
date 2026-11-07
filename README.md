@@ -14,7 +14,7 @@ frame-accurately, exactly once, and shows the hardware's state.
 **Status.** Draft for the hardware developer to work against and correct.
 The app's side is built to this draft: the packets, the clock matching, the
 Bluetooth connection, a simulated board, and a test screen in the app
-(Settings › Hardware slate, section 12). Changes to the protocol should be
+(Settings › Hardware slate, section 13). Changes to the protocol should be
 agreed before either side builds against them. Open questions are at the
 end; answers there change the draft.
 
@@ -112,6 +112,7 @@ Service UUID **`67de563f-ea8d-4cdb-993b-bdb3fba387a6`**
 | Status | `96550b20-8e21-4dca-9a56-a2956b705f50` | Read, Notify | board → app | 7 |
 | Card | `5bd09867-5af1-41c1-b0e4-077c52087beb` | Write (with response) | app → board | 8, optional |
 | Timecode | `5ac4de3d-e86b-431e-9b9b-3d22479b7591` | Write (with response) | app → board | 8, optional |
+| File | `0bde5362-dbb7-45d4-9a47-34d5cab7138b` | Write (with response) | app → board | 9, SD card |
 
 All multi-byte fields are **little-endian**. Every packet starts with a
 protocol version byte, `0x01` for this draft; a side that sees a version it
@@ -272,14 +273,71 @@ with integer arithmetic on its microsecond clock and shows HH:MM:SS:FF
 any change of source or rate. The board shows a lock state other than
 locked plainly (blinking digits, say), as the app does.
 
-## 9. What the board must do with no app
+## 9. The SD card: the facing page on board
 
-- Capture every close with its timestamp and keep it (section 6).
+The board keeps the day's paperwork on a microSD card (FAT32 or exFAT), so
+it survives without the phone and can be read in any computer. Everything
+lives under a top-level folder `VCSLATE/`, one folder per shooting day:
+
+```
+VCSLATE/
+  2026-11-07 Day 3/
+    facing-page.csv     written by the app (below), replaced after each take
+    events.csv          written by the board itself, one line per event
+```
+
+**`facing-page.csv`** is the script supervisor's facing page (description
+page): one block per setup with its description, lens, camera and sound
+rolls and frame rate, then one row per take with PRINT / HOLD / NG, time of
+day, timecode in, running time, rolls and comments. The same rows as the
+app's Facing page PDF and the supervisor's page in VC Film Studio. The app
+writes it over the **File** characteristic after every recorded clap, CUT
+and next take, and on connecting.
+
+**File** (app → board, Write with response). Every packet:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | `version` |
+| 1 | 1 | `op`: 1 BEGIN, 2 DATA, 3 COMMIT, 4 ABORT |
+| 2 | 2 | `transfer` id, the same on every packet of one file |
+| 4 | 4 | BEGIN: file length · DATA: byte offset · COMMIT: CRC-32 · ABORT: 0 |
+| 8 | … | BEGIN: the path, UTF-8, relative to `VCSLATE/`, at most 120 bytes · DATA: the bytes |
+
+The app sends BEGIN, then DATA pieces in order that fill each write (MTU
+less 3), then COMMIT. The board:
+
+1. On BEGIN, opens `path.part` (creating the day's folder), forgetting any
+   transfer still open.
+2. On DATA, appends if `offset` is what it has so far; anything else
+   abandons the transfer (deletes `path.part`).
+3. On COMMIT, checks the length and the CRC-32 (IEEE 802.3, as zlib's
+   `crc32`), then renames `path.part` over `path`. Only then is the old copy
+   replaced, so a transfer cut off by the radio or a flat battery never
+   leaves a half-written facing page.
+4. Refuses a path that starts with `/` or contains `..`.
+
+**`events.csv`** is the board's own record, written whatever the app does:
+`boot_id,sequence,kind,tick_us,flags,result,take,timecode_frames`, a line
+when the event happens and a second line with the ack's result, take
+number and timecode once the app answers (section 6). With no app all day
+it still lists every clap in order with the board's own time.
+
+The reference for both sides is `SDCard` and `FilePacket` in
+`SlateCore/Sources/SlateCore/Hardware/HardwareProtocol.swift`, tested in
+`SDCardTests` (the CRC check value, the packets byte for byte, a cut-off
+transfer, a bad CRC). The simulated board on the test screen keeps an SD
+card in software and lists what the app wrote to it.
+
+## 10. What the board must do with no app
+
+- Capture every close with its timestamp and keep it (section 6), and write
+  it to `events.csv` on the SD card.
 - If it has digits: keep running timecode from the last anchor, marked
   holdover; never show a time it was not given.
 - Sleep when idle; wake on the sticks opening.
 
-## 10. Tests
+## 11. Tests
 
 To pass before the app and board are called working together. Each is run
 with the app's test screen (to build: live packets, offsets, round trips,
@@ -297,8 +355,9 @@ latencies) and a reference.
 | H8 | Clock drift | 4 hours connected: offset drift within ±20 ppm; timecode on the board's digits within 1 frame of the app's |
 | H9 | Battery | a 12-hour day with the display on, from full |
 | H10 | Range | 10 m line of sight with a body between: no lost claps (they may arrive late) |
+| H11 | SD card | after 20 takes, `facing-page.csv` on the card matches the app's Facing page CSV; pulling power mid-transfer leaves the previous copy whole; `events.csv` lists every clap |
 
-## 11. Open questions for the hardware developer
+## 12. Open questions for the hardware developer
 
 1. **Does the board have its own display or timecode digits?** If yes,
    which: the full slate face, LED timecode only, or e-ink? (Section 8.)
@@ -308,7 +367,8 @@ latencies) and a reference.
    they are.
 4. **The chip and radio:** which BLE SoC, which stack. Is Wi-Fi present?
 5. **Clock:** crystal and its ppm; is there a 32 kHz RTC kept in sleep?
-6. **Flash:** can the event queue survive power loss?
+6. **Flash:** can the event queue survive power loss? Is there a microSD
+   slot (section 9), and which file system?
 7. **Timecode in:** does the board read LTC itself (a 3.5 mm or Lemo
    input)? If so, it can stamp claps with timecode directly, and the
    Event packet gains a timecode field.
@@ -318,7 +378,7 @@ latencies) and a reference.
 Answers go back into this document; the app's side is then built to it,
 starting with the test screen.
 
-## 12. The app's side, and the test screen
+## 13. The app's side, and the test screen
 
 Built to this draft (31 October 2026):
 
@@ -356,7 +416,9 @@ Built to this draft (31 October 2026):
     test — every event logged and acknowledged, so the board stops
     resending, and nothing written to the day. On, the board's sticks clap
     the slate on the instant they met, and ROLL, CUT, tail slate and next
-    take act, each once however often it is resent.
+    take act, each once however often it is resent. With it on, the facing
+    page is written to the board's SD card after each take (section 9);
+    the simulated board lists the files on its card under its buttons.
   - **Events**: every event, newest first: kind, RESENT if flagged, radio
     delay, what the slate did (in red if refused), and the event ID and
     board tick.
@@ -375,6 +437,9 @@ Built to this draft (31 October 2026):
 | Event Ack | same event, duplicate, take 3, frames 1 234 567 | `01 44 33 22 11 07 00 00 00 02 03 00 87 d6 12 00` |
 | Ping | nonce 9, t1 1 000 000 µs | `01 01 09 00 00 00 40 42 0f 00 00 00 00 00` |
 | Status | closed, 87 %, charging, 2 queued, boot `0x11223344`, −5 °C | `01 01 57 01 02 00 00 00 44 33 22 11 00 00 fb 00` |
+| File | `a.csv` containing `hello`, transfer 7: BEGIN, DATA, COMMIT | `01 01 07 00 05 00 00 00 61 2e 63 73 76` · `01 02 07 00 00 00 00 00 68 65 6c 6c 6f` · `01 03 07 00 86 a6 10 36` |
+
+CRC-32 check value: `"123456789"` gives `cbf43926` (`SDCardTests`).
 
 Not built yet: the Card and Timecode packets (section 8), which wait on
 open question 1.
